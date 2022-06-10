@@ -1,0 +1,83 @@
+---
+title: "Statistic analysis"
+author: "Laura Blanco"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(readxl)
+library(patchwork)
+library(lattice)
+library(lubridate)
+library(RColorBrewer)
+library(readxl)
+library(ggpubr)
+library(rstatix)
+
+datastat <- read_excel("C:/Users/lblan/OneDrive/Escritorio/CEAB/2022/First_chapter/data_analysis_cens.xlsx", 
+                       col_types = c("numeric", "date", "date", 
+                                     "numeric", "numeric", "numeric", 
+                                     "numeric"))
+datset_jar<-datastat[!(datastat$location=="2" | datastat$location=="3"),]
+datset_pal<-datastat[!(datastat$location=="1" | datastat$location=="3"),]
+datset_lab<-datastat[!(datastat$location=="1" | datastat$location=="2"),]
+
+#WE SEE IF THERE ARE SIGNIFICANT DIFFERENCES BETWEEN THE SURVIVAL IN THE URBAN AREA DEPENDING ON THE METHOD OF CAPTURE USED
+ks.test(datset_pal$total_lived, "pnorm", mean(datset_pal$total_lived, na.rm=T), sd(datset_pal$total_lived,na.rm=T))
+ggqqplot(datset_pal$total_lived) #to see the normal deviance in a graphic
+test_pal_bghl <- wilcox.test(datset_pal$total_lived~datset_pal$`hl/bg`, exact = FALSE)
+test_pal_bghl
+# WE DO THE SAME IN THE SEMI URBAN AREA
+ks.test(datset_jar$total_lived, "pnorm", mean(datset_jar$total_lived, na.rm=T), sd(datset_jar$total_lived,na.rm=T))
+ggqqplot(datset_jar$total_lived)#to see the normal deviance in a graphic
+test_jar_bghl <- wilcox.test(datset_jar$total_lived~datset_jar$`hl/bg`, exact = FALSE) 
+test_jar_bghl
+
+#WE SEE IF THERE ARE SIGNIFICANT DIFFERENCES BETWEEN THE SURVIVAL BY FIELD LOCATION (URBAN VS SEMI-URBAN), OF MOSQUITOES CAPTURED BY HL
+datset_hl_location<-datastat[!(datastat$location=="3" | datastat$`hl/bg` == "2"),]
+ks.test(datset_hl_location$total_lived, "pnorm", mean(datset_hl_location$total_lived, na.rm=T), sd(datset_hl_location$total_lived, na.rm=T))
+ggqqplot(datset_hl_location$total_lived) 
+test_pal_jar_hl <- wilcox.test(datset_hl_location$total_lived~datset_hl_location$location, exact = FALSE) 
+test_pal_jar_hl #p-value of 0.007609, so there are significant differences
+
+#WE SEE IF THERE ARE SIGNIFICANT DIFFERENCES BETWEEN THE SURVIVAL BY FIELD LOCATION (URBAN VS SEMI-URBAN), OF MOSQUITOES CAPTURED BY BG-TRAPS
+datset_bg_location<-datastat[!(datastat$location=="3" | datastat$`hl/bg` == "1"),]
+ks.test(datset_bg_location$total_lived, "pnorm", mean(datset_bg_location$total_lived, na.rm=T), sd(datset_bg_location$total_lived, na.rm=T))
+
+ggqqplot(datset_bg_location$total_lived) 
+test_pal_jar_bg <- wilcox.test(datset_bg_location$total_lived~datset_bg_location$location, exact = FALSE) 
+test_pal_jar_bg #p-value of 0.03654, so there are significant differences
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```

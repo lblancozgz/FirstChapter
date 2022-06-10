@@ -1,0 +1,936 @@
+---
+title: "Analysis_First_Chapter"
+author: "Laura Blanco"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+## Analysis of Survival Complete
+
+The aim of this document is to analyse and study the data collected in the sampling season of 2021, and also compare with our reference cohort in the laboratory to construct life tables for modelling the age structure in the population.
+
+Survival analysis is the study of survival times and of the factors that influence them. Examples of survival times include time from birth until death, time from entry into a clinical trial until death or disease progression, or time from birth to development of breast cancer (that is, age of onset). 
+A key characteristic of survival data is that the response variable is a non-negative discrete or continuous random variable, and represents the time from a welldefined origin to a well-defined event.
+A second characteristic of survival analysis, censoring, arises when the starting or ending events are not precisely observed.
+Censoring may be classified into three types: Type I, Type II, or random.
+
+ 1) Type I censoring, the censoring times are pre-specified. For example, in an animal experiment, a cohort of animals may start at a specific time, and all followed until a pre-specified ending time. Animals which have not experienced the event of interest before the end of the study are then censored at that time.
+ 
+ 2) Type II censoring occurs when the experimental objects are followed until a prespecified fraction have failed. Such a design is rare in biomedical studies, but may be used in industrial settings, where time to failure of a device is of primary interest. An example would be one where the study stops after, for instance, 25 out of 100 devices are observed to fail. The remaining 75 devices would then be censored.
+ 
+ 3) The last general category of censoring is random censoring. In biomedical settings, one cause of random censoring is patient dropout. If the dropout occurs truly at random, and is unrelated to the disease process, such censoring may
+not cause any problems with bias in the analysis. **This would be our type of censoring**.
+
+The goals of survival analysis are to estimate the survival distribution, to compare two or more survival distributions, or (more generally) to assess the effects of a number of factors on survival.
+
+```{r}
+library(survival)
+library(survminer)
+library(ranger)
+library(ggplot2)
+library(dplyr)
+library(ggfortify)
+library(ggpubr)
+library(ggsci)
+library(readxl)
+library(showtext)
+library(lubridate)
+setwd("C:\\Users\\lblan\\OneDrive\\Escritorio\\CEAB\\2022\\First_chapter")
+data_analysis <- 
+  read_excel("C:/Users/lblan/OneDrive/Escritorio/CEAB/2022/First_chapter/data_analysis_cens.xlsx", 
+    col_types = c("numeric", "date", "date", 
+        "numeric", "numeric", "numeric", "numeric"))
+
+#Now, data of weather (RH and Temperature) in both locations in the field (HOBO's data)
+jardin_clima <- 
+  read_excel("C:/Users/lblan/OneDrive/Escritorio/CEAB/2022/Jardin_clima_total.xlsx", 
+    col_types = c("date", "numeric", "numeric"))
+
+palafolls_clima <- 
+  read_excel("C:/Users/lblan/OneDrive/Escritorio/CEAB/2022/Palafolls_clima_total.xlsx", 
+    col_types = c("date", "numeric", "numeric"))
+
+#URBAN DATAFRAME OF WEATHER
+temperaturemeanpal<- palafolls_clima%>% 
+  #v#calculating means of temperature and rhper day (HOBO makes 3 measures per day)
+  group_by(DATE)%>%
+  summarise(meantemperature=mean(TEMPERATURE),meanrh = mean(RH) )
+
+temperatureminpal<- palafolls_clima%>% 
+  #v#calculating mins of temperature and rhper day (HOBO makes 3 measures per day)
+  group_by(DATE)%>%
+  summarise(mintemperature=min(TEMPERATURE),minrh = min(RH) )
+
+temperaturemaxpal<- palafolls_clima%>% 
+  #v#calculating max of temperature and rhper day (HOBO makes 3 measures per day)
+  group_by(DATE)%>%
+  summarise(maxtemperature=max(TEMPERATURE),maxrh = max(RH) )
+palafolls_clima<- merge(temperaturemaxpal, temperaturemeanpal, by = "DATE")
+palafolls_clima_total<- merge(palafolls_clima, temperatureminpal, by = "DATE")
+remove(palafolls_clima)
+remove(temperaturemaxpal)
+remove(temperatureminpal)
+remove(temperaturemeanpal)
+
+#SEMI-URBAN DATAFRAME OF WEATHER
+temperaturemeanjar<- jardin_clima%>% #calculating means of temperature and rh per day
+  group_by(DATE)%>%
+  summarise(meantemperature=mean(TEMPERATURE),meanrh = mean(RH))
+
+temperatureminjar<- jardin_clima%>% #calculating min of temperature and rh per day
+  group_by(DATE)%>%
+  summarise(mintemperature=min(TEMPERATURE),minrh = min(RH))
+
+temperaturemaxjar<- jardin_clima%>% #calculating max of temperature and rh per day
+  group_by(DATE)%>%
+  summarise(maxtemperature=max(TEMPERATURE),maxrh = max(RH))
+jardin_clima<- merge(temperaturemaxjar, temperaturemeanjar, by = "DATE")
+jardin_clima_total<- merge(jardin_clima, temperatureminjar, by = "DATE")
+remove(jardin_clima)
+remove(temperaturemaxjar)
+remove(temperaturemeanjar)
+remove(temperatureminjar)
+
+jardin_clima_total$location <- "1" 
+#creating new columns according to the locations
+jardin_clima_total$location<- as.numeric(jardin_clima_total$location)
+palafolls_clima_total$location<- "2"
+palafolls_clima_total$location<- as.numeric(palafolls_clima_total$location)
+#renaming column DATE to match with start_date column from our data_analysis dataframe
+jardin_clima_total <- jardin_clima_total %>% 
+  rename(start_date = DATE)
+palafolls_clima_total <- palafolls_clima_total %>% 
+  rename(start_date = DATE)
+
+datos_semi <- inner_join(data_analysis, jardin_clima_total, 
+                         by = c("start_date", "location"), all= TRUE) 
+#Combining temperature of each location with the data
+datos_urban <- inner_join(data_analysis, palafolls_clima_total, 
+                          by = c("start_date", "location"), all= TRUE)
+datos_lab<- subset(data_analysis, location=="3")
+datos_lab$meantemperature <- NA
+datos_lab$meanrh <- NA
+datos_lab$mintemperature <- NA
+datos_lab$minrh <- NA
+datos_lab$maxtemperature <- NA
+datos_lab$maxrh <- NA
+datos_field_lab <- rbind(datos_semi,datos_urban, datos_lab) 
+#merging all to have a dataframe completed (data survival + weather)
+datos_field<- rbind(datos_semi, datos_urban)
+clima_field <- rbind(jardin_clima_total, palafolls_clima_total)
+
+```
+Dichotomize days lived (age) and change data labels
+
+```{r}
+datos_field_lab$`hl/bg` <- factor(datos_field_lab$`hl/bg`, 
+                     levels = c("1", "2"), 
+                     labels = c("HL", "BG"))
+datos_field_lab$location <- factor(datos_field_lab$location, 
+                           levels = c("1", "2", "3"), 
+                           labels = c("Semi_Urban", "Urban", "Laboratory"))
+datos_field$`hl/bg` <- factor(datos_field$`hl/bg`, 
+                     levels = c("1", "2"), 
+                     labels = c("HL", "BG"))
+datos_field$location <- factor(datos_field$location, 
+                           levels = c("1", "2"), 
+                           labels = c("Semi_Urban", "Urban"))
+
+hist(datos_field_lab$total_lived) 
+
+datos_field <- datos_field %>%
+rename(method = 'hl/bg')
+```
+Fit survival data using the Kaplan-Meier method. By convention, vertical/cross lines indicate censored data, their corresponding x values the time at which censoring occurred.
+
+```{r message=FALSE, warning=FALSE}
+
+survfit(Surv(total_lived, censored) ~ location, data = datos_field_lab, 
+        type = "kaplan-meier") 
+
+Fig1 <-  survfit(Surv(total_lived, censored) ~ location, 
+                 data = datos_field_lab, type = "kaplan-meier") %>%
+ggsurvplot(
+ surv.median.line = "hv",
+ legend.title = "Location",
+ legend.labs = c("Semi-Urban", "Urban", "Laboratory"),
+ ylab="Survival probability", xlab="Total of days lived",
+ legend= c(0.9,0.8),
+ pval = T,
+ surv.plot.heigh = 1.30,
+ break.x.by = 10,
+ font.tickslab = c(16),
+ font.y = c(16),
+ font.x = c(16),
+ conf.int = TRUE,
+ risk.table = TRUE,
+ tables.col = "black",
+ risk.table.pos="out",
+ risk.table.title="",
+ risk.table.fontsize = 4.75,
+ tables.height = 0.25,
+ tables.theme = theme_bw(),
+ palette =c("#800000FF", "#CC8214FF", "#155F83FF"),
+ ggtheme = theme_bw((base_size=16)))
+
+Fig1
+
+```
+The log-rank p-value of <0.0001 indicates a significant result if you consider p < 0.05 to indicate statistical significance. In this study, the Laboratory location was significantly different (mosquitoes in Laboratory were better in the first 50 days compared with the field mosquitoes) than the field locations (Urban>Semi-urban). What about the other variables?
+
+```{r message=FALSE, warning=FALSE}
+datos_field_lab <- datos_field_lab %>% 
+  rename(method = `hl/bg`)
+
+survfit(Surv(total_lived, censored) ~ method, data = datos_field_lab, 
+        type = "kaplan-meier")
+
+ggsurvplot(survfit(Surv(total_lived, censored) ~ method, 
+                   data = datos_field_lab, type = "kaplan-meier"),pval = TRUE)
+
+Fig2 <-  survfit(Surv(total_lived, censored) ~ method, 
+                 data = datos_field_lab, type = "kaplan-meier") %>%
+ggsurvplot(
+ surv.median.line = "hv",
+ ylab="Survival probability", xlab="Total of days lived",
+ surv.plot.heigh = 1.30,
+ break.x.by = 10,
+ font.tickslab = c(16),
+ font.y = c(16),
+ font.x = c(16),
+ conf.int = TRUE,
+ risk.table = TRUE,
+ tables.col = "black",
+ risk.table.pos="out",
+ risk.table.title="",
+ risk.table.fontsize = 4.75,
+ tables.height = 0.25,
+ tables.theme = theme_bw(),
+ palette =c("#800000FF", "#CC8214FF"),
+ ggtheme = theme_bw((base_size=16)))
+
+Fig2
+
+
+#This is a plot about the survival between locations by method of capture#
+Fig3<- survfit(Surv(total_lived, censored)~ method + location, 
+               datos_field_lab, conf.type="log-log")%>%
+ggsurvplot(
+ conf.int = T, 
+ facet.by = "location",
+ legend.title = "Method of capture", 
+ short.panel.labs = T,
+ legend.labs = c("BG-Traps", "Human Landing"),
+ ylab="Survival probability", xlab="Total of days lived ",
+ legend= c(0.87,0.8),
+ surv.plot.heigh = 1.30,
+ break.x.by = 10,
+ font.tickslab = c(11),
+ font.y = c(14),
+ font.x = c(14),
+ palette =c("#800000FF", "#155F83FF"),
+ ggtheme = theme_bw(base_size=11),
+)
+
+#This is a plot about the survival between same methods of capture 
+#in the different locations#
+Fig4<- survfit(Surv(total_lived, censored)~ location + method, 
+               datos_field_lab, conf.type="log-log")%>%
+ggsurvplot(
+ conf.int = T, 
+ facet.by = "method",
+ legend.title = "Location", 
+ short.panel.labs = T,
+ legend.labs = c("Semi-Urban", "Urban"),
+ ylab="Survival probability", xlab="Total of days lived",
+ legend= c(0.87,0.8),
+ surv.plot.heigh = 1.30,
+ break.x.by = 10,
+ font.tickslab = c(11),
+ font.y = c(14),
+ font.x = c(14),
+ palette =c("#CC8214FF", "#616530FF"),
+ ggtheme = theme_bw(base_size=11),
+)
+
+FIG5<- ggarrange(Fig3 + rremove("ylab") + rremove("xlab"), 
+                 Fig4 + rremove("ylab") + rremove("xlab"), 
+                 nrow = 2, labels =c("A", "B")) 
+
+library(grid)
+
+FIGURA5COMPLETE<- annotate_figure(FIG5, left = textGrob("Survival Probability", 
+                                                        rot = 90, vjust = 0.1, 
+                                                        gp = gpar(cex = 1.3)),
+                    bottom = textGrob("Total of days lived", 
+                                      gp = gpar(cex = 1.3)))
+FIGURA5COMPLETE
+
+```
+
+**ESTIMATION OF THE CUMULATIVE RISK FUNCTION**
+
+*Maximum Likelihood Estimate*
+The information of the Time and Probability of survival is extracted from the survfit object (survkm) using *fortify*, later, if there is a covariate, it is grouped using *group_by*, the accumulated risk is calculated using mutate and finally it is stored in the variable R (in method, S).
+```{r}
+survloc <- survfit(Surv(total_lived, censored) ~ location, datos_field_lab)
+R <- survloc %>% fortify %>% group_by(strata) %>% 
+  mutate(CumHaz = cumsum(n.event/n.risk))
+print(R, 60)
+ggsurvplot(survloc, fun = "cumhaz", xlab = "time (days)", censor = T, 
+    ylab = "cumulative risk", title = "cumulative risk", 
+    legend.title = "Location")
+
+survmet <- survfit(Surv(total_lived, censored) ~ method, datos_field)
+S <- survmet %>% fortify %>% group_by(strata) %>% 
+  mutate(CumHaz = cumsum(n.event/n.risk))
+print(S, 60)
+ggsurvplot(survmet, fun = "cumhaz", xlab = "time (days)", censor = T, 
+    ylab = "cumulative risk", title = "cumulative risk", 
+    legend.title = "Method")
+
+```
+
+**ESTIMATION OF THE MEAN, MEDIAN AND PERCENTILES OF SURVIVAL TIMES**
+```{r}
+print(survloc, print.rmean = TRUE)
+print(survmet, print.rmean = TRUE)
+quantile(survloc, c(0.05, 0.5, 0.95))
+quantile(survmet, c(0.05, 0.5, 0.95))
+
+```
+
+**COMPARING TWO GROUPS OF SURVIVAL TIMES**
+
+We are interested in testing a null hypothesis that two population means are equal versus an alternative that the means are not equal (for a two-sided test) or that the mean for an experimental method is greater than that for another (one-sided test). We compute a test statistic from the observed data, and reject the null hypothesis if the test statistic exceeds a particular constant. If the normal distribution assumption is in doubt, a rank-based test called the Mann-Whitney test may be used, which gives valid test results without making parametric assumptions. 
+However, survival data generally doesn’t lend itself to analysis by parametric methods. Thus, we shall construct nonparametric testsof equivalence of two survival functions.
+```{r}
+survdiff(Surv(total_lived, censored) ~ location, data = datos_field_lab, 
+         rho = 0)  #Prueba log-rank LOCATION
+survdiff(Surv(total_lived, censored) ~ method, data = datos_field, 
+         rho = 0)  #Prueba log-rank METHOD
+
+```
+The p-value in the first comparison with location is <2e-16, indicating that the group difference is statistically
+significant. In the comparison with methods, the p-value is 3e-07, also indicating a statistical significance between the two methods employed in the capture.
+
+**PARAMETRIC ESTIMATION OF THE SURVIVAL FUNCTION**
+
+The survival function can be estimated by means of parametric distributions with the *flexsurvreg()* function from the *flexsurv package*. Parameters are estimated by maximum likelihood using the algorithms available in R's optim() function. Parameters defined as positive are estimated on the logarithmic scale. Confidence intervals are calculated from the Hessian matrix, and transformed back to the original scale of the parameters.
+
+```{r}
+#HERE WE ARE NOT ADDING ANY VARIABLE
+library(flexsurv)
+flex <- flexsurvreg(Surv(total_lived, censored) ~ 1, 
+                    data = datos_field_lab, dist = "exp")  #Ajuste exponencial
+flex
+plot(flex, type = "cumhaz", ci = F, main = "Cumulative Risk", conf.int = F, 
+    col = 3, col.obs = 4, xlab = "Tiempo", ylab = "Cumulative Risk")
+plot(flex, type = "survival", ci = F, main = "Survival Probability", 
+    conf.int = F, col = 1, col.obs = 2, xlab = "Tiempo", 
+    ylab = "Survival Probability")
+
+#here we add a variable
+model <- datos_field_lab %>% group_by(location) %>% 
+  do(flex = flexsurvreg(Surv(total_lived, censored) ~ 
+    1, data = ., dist = "gompertz"))
+model
+
+KM <- survfit(Surv(total_lived, censored) ~ location, data = datos_field_lab)
+
+plot(KM, col = 1:length(model$flex), 
+     main = "Parametric comparison", xlab = "Time", 
+    ylab = "Survival Probability") 
+for (i in 1:length(model$flex)) lines(model$flex[[i]], ci = F, col = i)
+
+
+#cumulated risk
+plot(KM, col = 1:length(model$flex), 
+     main = "Parametric comparison", xlab = "Time", 
+    ylab = "Cumulated Hazard", fun = "cumhaz")
+for (i in 1:length(model$flex)) lines(model$flex[[i]], ci = F, col = i, 
+                                      type = "cumhaz")
+
+#COMPARISON BETWEEN SURVIVAL CURVES - PARAMETRIC AND NON PARAMETRIC
+
+flexgg <- flexsurvreg(Surv(total_lived, censored) ~ 1, 
+                      data = datos_field_lab, dist = "exp") %>% 
+    summary(type = "survival") %>% data.frame
+
+kmgg <- survfit(Surv(total_lived, censored) ~ 1, 
+                data = datos_field_lab) %>% fortify
+
+ggplot() + geom_line(aes(time, est, col = "Parametric"), data = flexgg) + 
+  geom_step(aes(time, 
+    surv, col = "Non Parametric"), data = kmgg) + labs(x = "Time (days)", 
+    y = "Survival Probability", col = "Settings", 
+    title = "Comparison between survival curves")
+
+#If we remove the data of the Laboratory and we only analyse the data 
+#from the field, that comparison is closer than if we see the 3 locations 
+#together
+
+
+model <- datos_field %>% group_by(method) %>% 
+  do(flex = flexsurvreg(Surv(total_lived, censored) ~ 
+    1, data = ., dist = "gompertz"))
+model
+
+KM <- survfit(Surv(total_lived, censored) ~ method, data = datos_field)
+
+plot(KM, col = 1:length(model$flex), main = "Parametric comparison", 
+     xlab = "Time", 
+    ylab = "Survival Probability") 
+for (i in 1:length(model$flex)) lines(model$flex[[i]], ci = F, col = i)
+
+
+#cumulated risk
+plot(KM, col = 1:length(model$flex), main = "Parametric comparison", 
+     xlab = "Time", 
+    ylab = "Cumulated Hazard", fun = "cumhaz")
+for (i in 1:length(model$flex)) lines(model$flex[[i]], ci = F, col = i, 
+                                      type = "cumhaz")
+
+flexgg_field <- flexsurvreg(Surv(total_lived, censored) ~ 1, data = datos_field, 
+                            dist = "exp") %>% 
+    summary(type = "survival") %>% data.frame
+
+kmgg_field <- survfit(Surv(total_lived, censored) ~ 1, data = datos_field) %>% 
+  fortify
+
+ggplot() + geom_line(aes(time, est, col = "Parametric"), data = flexgg_field) + 
+  geom_step(aes(time, 
+    surv, col = "Non Parametric"), data = kmgg_field) + labs(x = "Time (days)", 
+    y = "Survival Probability", col = "Settings", 
+    title = "Comparison between survival curves")
+
+```
+
+**COMPARISON BETWEEN MODELS **
+```{r}
+datosflex <- datos_field
+Dist <- c("exp", "weibull", "llogis", "gompertz", "genf")
+data.Surv <- Surv(datosflex$total_lived, datosflex$censored)
+
+model <- sapply(Dist, function(x) flexsurvreg(data.Surv ~ 1, dist = x), 
+                USE.NAMES = T, 
+    simplify = F)
+
+model
+
+M <- survfit(data.Surv ~ 1, data = datosflex)
+KMdist <- KM %>% fortify()
+
+Flexdist <- names(model) %>% 
+  sapply(function(x) cbind(Dist = x, data.frame(summary(model[[x]]))), 
+    simplify = F) %>% do.call("rbind", .)
+
+x <- (1:length(Dist)) + 1 
+names(x) <- Dist 
+
+ggplot() + geom_line(aes(time, est, col = factor(Dist)), Flexdist, size = 0.9, 
+    alpha = 0.5) + geom_step(aes(time, surv, col = "Non parametric", group = 1), 
+    KMdist, size = 1, alpha = 0.9) + 
+  scale_color_manual(values = c(`No Parametrico` = "black", 
+    x)) + labs(col = "Distributions", linetype = "Settings", x = "Time(days)", 
+    y = "Survival probability", 
+    title = "Parametric vs. non parametric settings")
+#cumulated risk
+KM <- survfit(data.Surv ~ 1, data = datosflex)
+KMdist <- KM %>% fortify()
+
+Flexdist <- names(model) %>% 
+  sapply(function(x) cbind(Dist = x, data.frame(summary(model[[x]]))), 
+    simplify = F) %>% do.call("rbind", .)
+
+x <- (1:length(Dist)) + 1  
+names(x) <- Dist 
+
+ggplot() + geom_line(aes(time, -log(est), col = factor(Dist)), Flexdist, 
+                     size = 0.9, 
+    alpha = 0.5) + geom_step(aes(time, -log(surv), col = "Non Parametric", 
+                                 group = 1), 
+    KMdist, size = 1, alpha = 0.9) + 
+  scale_color_manual(values = c(`No Parametrico` = "black", 
+    x)) + labs(col = "Distributions", linetype = "Settings", x = "Time(days)", 
+    y = "Cumulated Risk", title = "Parametric vs. Non Parametric")
+
+```
+
+
+**Graphic tests for specific models**
+
+The PPlot() function checks through a series of transformations whether the non-parametric estimate can be reasonably estimated by some parametric model. The function's arguments are as follows:
+
+  1)dist: Name of the distribution.
+  2)KM: Nonparametric estimation of the data using survfit().
+  3)lm: Flag (TRUE/FALSE) if you want to fit a least squares line.
+
+```{r}
+KM <- survfit(Surv(total_lived, censored) ~ 1, data = datos_field_lab)
+PPlot <- function(dist, KM, lm = F, ...) {
+    time <- KM$time
+    st <- KM$surv
+    x <- switch(dist, exp = time, weibull = log(time), gumbel = time, 
+                lnorm = log(time), 
+        gamma = sqrt(time), norm = time, logis = time, 
+        llogis = log(time), pareto = log(time))
+    y <- switch(dist, exp = log(st), weibull = log(-log(st)), 
+                gumbel = log(-log(st)), 
+        lnorm = qnorm(1 - st), gamma = qnorm(1 - st), norm = qnorm(1 - st), 
+        logis = log((1 - st)/st), llogis = log((1 - st)/st), pareto = log(st))
+    qplot(x, y, main = paste("Papel de Probabilidad", dist)) + 
+      geom_line(stat = "smooth", 
+        method = "lm", alpha = lm)
+    
+}
+PPlot("pareto", KM)
+PPlot("exp", KM, lm = T) + labs(title = "Papel de Probabilidad Exponencial", 
+    y = "ln(S(t))", x = "t")
+```
+
+***COX PROPORTIONAL HAZARDS MODEL***
+```{r}
+coxloc<- coxph(Surv(total_lived, censored) ~ location, data= datos_field_lab)
+summary(coxloc) 
+```
+We see that the estimate of the log hazard ratio location effect is 0.79534 in the Urban Location and 0.44581  in the Laboratory. Since they are below 1, lower hazards are associated with these locations than with the SemiUrban area. That is, these locations appear to not reduce survival, while SemiUrban location rises the hazard of death. p-value in Urban and Laboratory is < 0.05, and CI95% is [0.6925-0.9135] and [0.3891-0.5108] respectively. As the CI doesn't include 1.00, there's significant association at 5% level.
+
+```{r}
+coxmet<- coxph(Surv(total_lived, censored) ~ method, data= datos_field)
+summary(coxmet)
+coxlocfield<- coxph(Surv(total_lived, censored) ~ location, data= datos_field)
+summary(coxlocfield)
+
+```
+We see that the estimate of the log hazard ratio method effect is 1.56897. Since this is >1, higher hazards are associated with the BG-traps as capture method, comparing with the Human Landing method. That is, the BG-Traps method appears increase the hazard of death. It also suggests that a given moment, a mosquito captured by BG-Traps instead of Human Landing is about 1.56897 times as likely to die as some other mosquito captured by Human Landing.
+
+If we analyse the log hazard ratio location effect only in the field, we also see that the Urban location is <1, so lower hazard is associated with this location compared to the SemiUrban area.
+
+
+```{r}
+cox_factorsmedio<- coxph(Surv(total_lived, censored) ~ method + location, 
+                         data= datos_field)
+summary(cox_factorsmedio)
+ggforest(cox_factorsmedio)
+
+```
+Putting the 2 variables together we also see the same influence in the survival as they had separately.
+
+**Addition of weather variables, treated as Time-Varying covariates**
+
+*Preparing the dataframe*
+
+```{r}
+df <- read_excel("datos_field.xlsx", 
+                 col_types = c("numeric", 
+                                   "date", "date", "numeric", "numeric", 
+                                   "numeric", "numeric", "numeric", "numeric", 
+                                  "numeric", "numeric", "numeric", "numeric"))
+clima <- read_excel("clima_field.xlsx", 
+                    col_types = c("date", 
+                                     "numeric", "numeric", "numeric", "numeric", 
+                                      "numeric", "numeric", "numeric"))
+
+new_df <- df[0, ] 
+# this also works, mantaining object structure (data.frame) and column names
+
+id <- seq_len(nrow(df)) # since there are duplicated ID, we iterate by row
+
+df$start_date <- as.Date(df$start_date, format = '%Y-%m-%d')
+
+df$start_date <- as.Date(df$start_date, format = '%Y-%m-%d')
+clima$start_date <- as.character(as.Date(clima$start_date, format = '%Y-%m-%d'))
+
+new_df <- do.call('rbind', lapply(seq_len(nrow(df)), function(id){
+  tmp <- do.call('rbind', replicate(df$total_lived[id],
+                                    df[id, ], simplify = FALSE))
+  tmp$start_date <- format(seq(tmp$start_date[1], by = 'day',
+                               length.out = nrow(tmp)), '%Y-%m-%d')
+  tmp
+}))
+
+vars <- c('maxtemperature', 'meantemperature', 
+          'mintemperature', 'maxrh', 'minrh', 'meanrh')
+for(d in unique(clima$start_date)){
+  new_df[new_df$start_date == d & new_df$location == 1, vars] <-
+    clima[clima$start_date == d & clima$location == 1, vars]
+  new_df[new_df$start_date == d & new_df$location == 2, vars] <-
+    clima[clima$start_date == d & clima$location == 2, vars]
+}
+
+
+#we add photoperiod
+library(meteor)
+photoperiod <- photoperiod(152:334,  41.6833)
+photoperiod <- as.data.frame(photoperiod)
+values = seq(from = as.Date("2021-06-01"), to = as.Date("2021-11-30"), by = 'day')
+photoperiod$dates <- values
+photoperiod$dates <- as.character(as.Date(photoperiod$dates, format = '%Y-%m-%d'))
+new_df$start_date <- as.character(as.Date(new_df$start_date, format = '%Y-%m-%d'))
+
+str(photoperiod)
+new_df[ , 'photoperiod'] <- 0 # new column called photoperiod
+vars2 <- c('photoperiod')
+for(d in unique(photoperiod$dates)){
+  new_df[new_df$start_date == d,vars2] <-
+    photoperiod[photoperiod$dates == d, vars2]
+}
+
+new_df$`hl/bg` <- factor(new_df$`hl/bg`, 
+                         levels = c("1", "2"), 
+                         labels = c("HL", "BG"))
+new_df$location <- factor(new_df$location, 
+                          levels = c("1", "2"), 
+                          labels = c("Semi_Urban", "Urban"))
+
+
+```
+
+**COLLINEARITY**
+
+Collinearity in a Cox regression leads to the same problems as it does in other forms of regression (unstable parameter estimates, difficulty in interpretation...) and the solutions to the problem are the same (e.g., remove redundant variables). However, unlike lm and glm, the car::vif() function will not work with a coxph object. Instead, first fit a linear regression model with any numeric variable as the outcome (here we use the event time variable) and compute the VIFs for that model. Values above 2.5 may be of concern (P. Allison 2012), and values above 5 or 10 are indicative of a more serious problem.
+
+**How each weather variable affects Urban location?**
+
+```{r}
+datosurban<- subset(new_df, location == "Urban")
+datosemi<- subset(new_df, location == "Semi_Urban")
+```
+
+```{r}
+coxurbantmin <- coxph(Surv(total_lived, censored) ~ mintemperature, 
+                      data= datosurban)
+summary(coxurbantmin)
+
+coxurbantmean <- coxph(Surv(total_lived, censored) ~ meantemperature, 
+                       data= datosurban)
+summary(coxurbantmean)
+
+coxurbantmax <- coxph(Surv(total_lived, censored) ~ maxtemperature, 
+                      data= datosurban)
+summary(coxurbantmax)
+
+coxurbanrmin <- coxph(Surv(total_lived, censored) ~ minrh, 
+                      data= datosurban)
+summary(coxurbanrmin)
+
+coxurbanrmean <- coxph(Surv(total_lived, censored) ~ meanrh, 
+                       data= datosurban)
+summary(coxurbanrmean)
+
+coxurbanrmax <- coxph(Surv(total_lived, censored) ~ maxrh, 
+                      data= datosurban)
+summary(coxurbanrmax)
+
+coxurban <- coxph(Surv(total_lived, censored) ~ photoperiod + 
+                    maxtemperature + meantemperature + mintemperature + 
+                    maxrh + meanrh + minrh, data= datosurban)
+summary(coxurban)
+rms::vif(coxurban) #meantemperature has a huge vif (138.432013)
+
+coxurban2 <- coxph(Surv(total_lived, censored) ~ photoperiod + maxtemperature + 
+                     mintemperature + maxrh + meanrh + minrh, data= datosurban)
+summary(coxurban2)
+rms::vif(coxurban2) #now meanrh has the next highest vif (27.854746)
+
+coxurban3 <- coxph(Surv(total_lived, censored) ~ photoperiod + maxtemperature + 
+                     mintemperature + maxrh + minrh, data= datosurban)
+summary(coxurban3)
+rms::vif(coxurban3) 
+#The highest vif now are min and max temperature 
+#(is not very high, 6, but >5 we should try to fix it)
+
+coxurban4 <- coxph(Surv(total_lived, censored) ~ photoperiod + 
+                     mintemperature + maxrh + minrh, data= datosurban)
+summary(coxurban4)
+rms::vif(coxurban4) 
+
+stats::step(coxurban4) #minrh is removed
+coxurban5 <- coxph(Surv(total_lived, censored) ~ photoperiod + 
+                     mintemperature + maxrh, data= datosurban)
+summary(coxurban5)
+```
+
+```{r}
+coxsemiurbantmin <- coxph(Surv(total_lived, censored) ~ mintemperature, 
+                          data= datosemi)
+summary(coxsemiurbantmin)
+
+coxsemiurbantmean <- coxph(Surv(total_lived, censored) ~ meantemperature, 
+                           data= datosemi)
+summary(coxsemiurbantmean)
+
+coxsemiurbantmax <- coxph(Surv(total_lived, censored) ~ maxtemperature, 
+                          data= datosemi)
+summary(coxsemiurbantmax)
+
+coxsemiurbanrmin <- coxph(Surv(total_lived, censored) ~ minrh, 
+                          data= datosemi)
+summary(coxsemiurbanrmin)
+
+coxsemiurbanrmean <- coxph(Surv(total_lived, censored) ~ meanrh, 
+                           data= datosemi)
+summary(coxsemiurbanrmean)
+
+coxsemiurbanrmax <- coxph(Surv(total_lived, censored) ~ maxrh, 
+                          data= datosemi)
+summary(coxsemiurbanrmax)
+
+coxsemiurban <- coxph(Surv(total_lived, censored) ~ photoperiod + 
+                        maxtemperature + meantemperature + mintemperature + 
+                        maxrh + meanrh + minrh, data= datosemi)
+summary(coxsemiurban)
+rms::vif(coxsemiurban) #meantemperature has a huge vif (232.722710)
+
+coxsemiurban2 <- coxph(Surv(total_lived, censored) ~ photoperiod + 
+                         maxtemperature + mintemperature + maxrh + meanrh + 
+                         minrh, data= datosemi)
+summary(coxsemiurban2)
+rms::vif(coxsemiurban2) #now meanrh has the next highest vif (67.489144)
+
+coxsemiurban3 <- coxph(Surv(total_lived, censored) ~ photoperiod + 
+                         maxtemperature + mintemperature + maxrh + 
+                         minrh, data= datosemi)
+summary(coxsemiurban3)
+rms::vif(coxsemiurban3) #The highest vif now is maxtemperature 
+#(is not very high, 7.607133, but >5 we should try to fix it)
+
+coxsemiurban4 <- coxph(Surv(total_lived, censored) ~ photoperiod + 
+                         mintemperature + maxrh + minrh, data= datosemi)
+summary(coxsemiurban4)
+rms::vif(coxsemiurban4) 
+
+stats::step(coxsemiurban4) #maxrh is removed
+coxsemiurban5 <- coxph(Surv(total_lived, censored) ~ photoperiod + 
+                         mintemperature + minrh, data= datosemi)
+summary(coxsemiurban5)
+
+```
+
+**MODEL DIAGNOSTICS**
+
+The use of residuals for model checking has been well-developed in linear regression theory. The residuals are plotted versus
+some quantity, such as a covariate value, and the observed pattern is used to diagnose possible problemswith the fitted model. Some residuals have the additional property of not only indicating problems but also suggesting remedies.
+
+
+*Martingale and Deviance Residuals*
+An important tool for assessing the goodness of fit of a model is to compare the censoring indicator (0 for censored, 1 for death) for each subject to the expected value of that indicator under the proportional hazards Cox model. In martingale residuals, residuals are symmetrically distributed with expected value 0 (if the fitted model is correct). The sum of squares of these residuals is the value of the likelihood ratio test, which is analogous to the deviance from generalized linear model theory.
+
+```{r}
+ggcoxdiagnostics(coxsemiurban5, type = "martingale")
+ggcoxdiagnostics(coxurban5, type = "martingale")
+
+
+```
+```{r}
+ggcoxdiagnostics(coxsemiurban5, type = "dfbeta")
+ggcoxdiagnostics(coxurban5, type = "dfbeta")
+
+
+```
+**Schoenfeld residuals**: A plot of theses residuals versus the covariate will yield a pattern of points that are
+centered at zero, if the proportional hazards assumption is correct. Note that these residuals are defined
+only for the failure (and not the censoring) times. If there are multiple covariates, then one obtains a series
+of residuals for each covariate.
+
+```{r}
+ggcoxzph(cox.zph(coxsemiurban5))
+ggcoxzph(cox.zph(coxurban5))
+
+```
+**GGFOREST**
+```{r}
+ggforest(coxsemiurban5)
+ggforest(coxurban5)
+```
+```{r}
+library(rms)
+dd = datadist(datosemi)
+options(datadist='dd')
+cphsemiurban5<- cph(Surv(total_lived, censored) ~ photoperiod + 
+                      mintemperature + minrh, data= datosemi)
+ggplot(Predict(cphsemiurban5))
+
+dd = datadist(datosurban)
+options(datadist='dd')
+cphurban5<- cph(Surv(total_lived, censored) ~ photoperiod + 
+                  mintemperature + maxrh, data= datosurban)
+ggplot(Predict(cphurban5))
+```
+
+**Growing degree days**
+```{r}
+library(scales)
+library(pollen)
+new_df_gdd <- new_df %>% 
+  mutate(gdd = gdd(tmax = maxtemperature, tmin = mintemperature, tbase = 10, tbase_max = 30)) %>% 
+  mutate(daily_acc_gdd = c(NA, diff(gdd)))
+g
+ddfield <- datos_field %>% 
+  mutate(gdd = gdd(tmax = maxtemperature, tmin = mintemperature, tbase = 10, tbase_max = 30)) %>% 
+  mutate(daily_acc_gdd = c(NA, diff(gdd)))
+
+gdd <-ggplot(aes(x =start_date, y= daily_acc_gdd), data = gddfield) + geom_line()
+gdd
+
+```
+
+**Cox-Regression Model with Field data**
+
+```{r}
+datos_field_cox <- new_df_gdd
+```
+
+```{r}
+cox_tmin <- coxph(Surv(total_lived, censored) ~ mintemperature, 
+                  data = datos_field_cox)
+summary(cox_tmin)
+```
+
+Minimum temperature has a hazard ratio >1, which means that increases in temperature (1 degree) rises the hazard of death 1.030481. p-value is significative (<0.05) and CI%95 is [1.026-1.035], so there is significant association at 5% level.
+
+```{r}
+cox_tmean <- coxph(Surv(total_lived, censored) ~ meantemperature, 
+                   data = datos_field_cox)
+summary(cox_tmean)
+```
+
+Mean temperature has a hazard ratio >1, which means that increases in temperature (1 degree) rises the hazard of death 1.036173. p-value is significative (<0.05) and CI%95 is [1.032-1.041], so there is significant association at 5% level.
+
+```{r}
+cox_tmax <- coxph(Surv(total_lived, censored) ~ maxtemperature, 
+                  data = datos_field_cox)
+summary(cox_tmax)
+```
+
+Max temperature has a hazard ratio >1, which means that increases in temperature (1 degree) rises the hazard of death 1.033672. p-value is significative (<0.05) and CI%95 is [1.029-1.038], so there is significant association at 5% level.
+
+```{r}
+cox_gdd <- coxph(Surv(total_lived, censored) ~ daily_acc_gdd, 
+                 data = datos_field_cox)
+summary(cox_gdd)
+```
+
+Degree days can be defined as the heating or cooling requirements (in degrees Celsius or Kelvin), necessary to reach the comfort zone, accumulated in a certain period of time (generally a month, although it could be weekly, or even hourly). This comfort temperature is the base temperature (TBase) set.
+The daily accumulated gdd has a hazard ratio >1, which means that increases in this temperature rises the hazard of death 1.035645. p-value is significative (<0.05) and CI%95 is [1.031-1.04], so there is significant association at 5% level.
+
+
+**MWI**
+
+```{r}
+mwi = function(Hum, Temp) {
+ FH = case_when(Hum < 40~0, Hum >95~0, (Hum >=40 & Hum <= 95)~
+                  ((Hum/55)-(40/55)) )
+  FT = case_when(Temp<=15~0, Temp>30~0, (Temp>15 & Temp <=20)~ 
+                   (.2*Temp)-3, (Temp>20 & Temp<=25)~1, (Temp>25 & Temp <= 30)~
+                   (-.2*6)+6)
+  return(FH*FT)
+}
+
+datos_field_cox <- datos_field_cox %>% 
+  mutate(Hum = meanrh, Temp = meantemperature)
+
+datos_field_cox = datos_field_cox %>% mutate(
+  FH = case_when(Hum < 40~0, Hum >95~0, (Hum >=40 & Hum <= 95)~
+                   ((Hum/55)-(40/55)) ),
+  FT = case_when(Temp<=15~0, Temp>30~0, (Temp>15 & Temp <=20)~ (.2*Temp)-3, 
+                 (Temp>20 & Temp<=25)~1, (Temp>25 & Temp <= 30)~ (-.2*Temp)+6),
+  mwi = FH*FT)
+
+```
+
+```{r}
+cox_mwi <- coxph(Surv(total_lived, censored) ~ mwi, data = datos_field_cox)
+summary(cox_mwi)
+```
+
+The Hazard Ratio os the mwi is >1, so increases in 1 ud in mwi suppose a rise in the hazard of death of 1.04907. p-value is 0.0565, and CI%95 is [0.9987-1.102] (includes 1), so there's not significant association at 5% level.
+
+```{r}
+cox_minrh <- coxph(Surv(total_lived, censored) ~ minrh, data = datos_field_cox)
+summary(cox_minrh)
+```
+
+```{r}
+cox_meanrh <- coxph(Surv(total_lived, censored) ~ meanrh, data = datos_field_cox)
+summary(cox_meanrh)
+```
+
+```{r}
+cox_maxrh <- coxph(Surv(total_lived, censored) ~ maxrh, data = datos_field_cox)
+summary(cox_maxrh)
+```
+
+```{r}
+cox_todo <- coxph(Surv(total_lived, censored) ~ mintemperature + meantemperature 
+                  + maxtemperature + minrh + meanrh + maxrh + mwi + daily_acc_gdd 
+                  + photoperiod, data = datos_field_cox)
+summary(cox_todo)
+rms::vif(cox_todo)
+
+cox_todo2 <- coxph(Surv(total_lived, censored) ~ mintemperature 
+                   + meantemperature + maxtemperature + minrh + meanrh
+                   + maxrh + mwi + photoperiod, data = datos_field_cox)
+summary(cox_todo2)
+rms::vif(cox_todo2)
+
+cox_todo3 <- coxph(Surv(total_lived, censored) ~ mintemperature + maxtemperature 
+                   + minrh + meanrh + maxrh + mwi + photoperiod, 
+                   data = datos_field_cox)
+summary(cox_todo3)
+rms::vif(cox_todo3)
+
+cox_todo4 <- coxph(Surv(total_lived, censored) ~ mintemperature  
+                   + maxtemperature + minrh  + maxrh + mwi 
+                   + photoperiod, data = datos_field_cox)
+summary(cox_todo4)
+rms::vif(cox_todo4)
+
+cox_todo5 <- coxph(Surv(total_lived, censored) ~maxtemperature + minrh 
+                   + maxrh + mwi + photoperiod, data = datos_field_cox)
+summary(cox_todo5)
+rms::vif(cox_todo5)
+
+stats::step(cox_todo5)
+
+cox_todo6 <- coxph(Surv(total_lived, censored) ~maxtemperature + minrh 
+                   + maxrh + photoperiod + mwi, data = datos_field_cox)
+summary(cox_todo6)
+rms::vif(cox_todo6)
+stats::step(cox_todo6)
+```
+
+
+**Multilevel**
+```{r}
+library(coxme)
+datos_field_cox <- datos_field_cox %>% 
+  rename(method = 'hl/bg')
+datos_field_cox$location <- as.factor(datos_field_cox$location)
+datos_field_cox$method <- as.factor(datos_field_cox$method)
+
+cox_location <- coxme(Surv(total_lived, censored) ~maxtemperature + minrh 
+                   + maxrh + photoperiod + mwi + (1|location), data = datos_field_cox)
+
+cox_method <- coxme(Surv(total_lived, censored) ~maxtemperature + minrh 
+                   + maxrh + photoperiod + mwi + (1|method), 
+                   data = datos_field_cox)
+cox_method
+library(tidyr)
+datos_field_cox<-unite(datos_field_cox, variables,c(4,7),  sep = "; ", remove = F)
+
+cox_variables_me <- coxme(Surv(total_lived, censored) ~maxtemperature + minrh 
+                   + maxrh + photoperiod + mwi + (1|variables), 
+                   data = datos_field_cox)
+summary(cox_variables_me) 
+
+```
+
+
+
+
+

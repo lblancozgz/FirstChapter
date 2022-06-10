@@ -1,0 +1,97 @@
+---
+title: "brms"
+author: "Laura Blanco"
+date: '2022-06-07'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+##Upload libraries
+
+```{r warning=FALSE}
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(survival)
+library(survminer)
+library(ranger)
+library(ggplot2)
+library(ggpubr)
+library(ggsci)
+library(readxl)
+library(showtext)
+library(lubridate)
+library(marginaleffects)
+library(brms)
+library(ggplot2)
+library(ggdist)
+library(magrittr)
+library(splines2)
+library(bayesplot)
+library(rstan)
+setwd("C:\\Users\\lblan\\OneDrive\\Escritorio\\CEAB\\2022\\First_chapter")
+
+
+```
+
+## Upload DATAFRAME
+
+You can also embed plots, for example:
+
+```{r}
+datasurv <- readxl::read_excel("datasurv.xlsx", col_types = c("numeric", 
+    "text", "date", "text", "numeric", "numeric", 
+    "text", "numeric", "numeric", "numeric", 
+    "numeric", "numeric", "numeric", "numeric", 
+    "numeric", "numeric", "numeric", "numeric", 
+    "numeric", "numeric", "numeric"))
+
+```
+
+
+
+#Upload models (we are using Growing degree days)
+
+```{r}
+load("fit.Rdata") #family COX
+print(fit)
+```
+
+```{r}
+load("fit1.Rdata") #family lognormal
+print(fit1)
+```
+
+#Checks fit1
+```{r}
+post <- posterior_samples(fit1, add_chain = T)
+post
+mcmc_dens_overlay(post, pars = c("b_Intercept")) +
+  theme(panel.grid = element_blank())
+mcmc_acf(post, pars = "b_Intercept", lags = 35)
+
+head(post)
+plot(conditional_effects(fit1))
+
+pp_check(fit1) + xlim(0,1000)
+
+
+```
+
+#checks fit family=cox. It produces a lot of problems because I think it is not complete developed
+```{r}
+#post <- posterior_samples(fit, add_chain = T)
+#post
+#mcmc_dens_overlay(post, pars = c("b_Intercept")) +
+#  theme(panel.grid = element_blank())
+#mcmc_acf(post, pars = "b_Intercept", lags = 35)
+#head(post)
+#plot(conditional_effects(fit)) #look at the error:Cannot compute expected values 
+#of the posterior predictive distribution for family 'cox'.
+
+
+```
