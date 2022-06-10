@@ -9,7 +9,7 @@ library(readxl)
 library(ggpubr)
 library(rstatix)
 setwd("C:\\Users\\lblan\\OneDrive\\Escritorio\\CEAB\\2022\\First_chapter")
-
+##
 datastat <- read_excel("C:/Users/lblan/OneDrive/Escritorio/CEAB/2022/First_chapter/data_analysis_cens.xlsx", 
                        col_types = c("numeric", "date", "date", 
                                      "numeric", "numeric", "numeric", 
@@ -17,7 +17,7 @@ datastat <- read_excel("C:/Users/lblan/OneDrive/Escritorio/CEAB/2022/First_chapt
 datset_field <- datastat[!(datastat$location=="3"),]
 datset_field_bg <- datastat[!(datastat$location=="3" | datastat$`hl/bg` == "1"),]
 
-#Creamos dataframe del jardín botánico para cada tipo de método de captura
+#Creamos dataframe del jard?n bot?nico para cada tipo de m?todo de captura
 datset_jar <- datastat[!(datastat$location=="2" | datastat$location=="3"),]
 datset_jar_hl<-datastat[!(datastat$location=="2" | datastat$location=="3"  | datastat$`hl/bg` == "2"),]
 datset_jar_bg<-datastat[!(datastat$location=="2" | datastat$location=="3" | datastat$`hl/bg` == "1"),]
@@ -26,7 +26,7 @@ ks.test(datset_jar_hl$total_lived, "pnorm", mean(datset_jar_hl$total_lived, na.r
 test_jar_bghl <- wilcox.test(datset_jar$total_lived~datset_jar$`hl/bg`, exact = FALSE, paired = FALSE)
 test_jar_bghl #p-value <0.05. There are significative differences between 2 methods of capture in the Botanical Garden
 
-#Creamos dataframe de Palafolls para cada tipo de método de captura
+#Creamos dataframe de Palafolls para cada tipo de m?todo de captura
 datset_pal<-datastat[!(datastat$location=="1" | datastat$location=="3"),]
 datset_pal_hl<-datastat[!(datastat$location=="1" | datastat$location=="3"| datastat$`hl/bg` == "2"),]
 datset_pal_bg<-datastat[!(datastat$location=="1" | datastat$location=="3"| datastat$`hl/bg` == "1"),]
